@@ -116,6 +116,71 @@ resource "azurerm_subnet_network_security_group_association" "gateway_assoc" {
   network_security_group_id = azurerm_network_security_group.nsg.id
 }
 
+# ===============================================================
+# Phase 2: Data Plane (Spoke VNets and Peering)
+# ===============================================================
+
+# --- 1. Application Spoke VNet ---
+resource "azurerm_virtual_network" "app_spoke_vnet" {
+  name                = "${var.prefix}-app-vnet"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  address_space       = "10.10.0.0/16" # Unique CIDR block for the App spoke
+}
+
+# App Subnet: For application VMs
+resource "azurerm_subnet" "app_spoke_subnet" {
+  name                 = "AppSubnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.app_spoke_vnet.name
+  address_prefixes     = "10.10.1.0/24"
+}
+
+# --- 2. Data Spoke VNet ---
+resource "azurerm_virtual_network" "data_spoke_vnet" {
+  name                = "${var.prefix}-data-vnet"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  address_space       = "10.20.0.0/16" # Unique CIDR block for the Data spoke
+}
+
+# Data Subnet: For database and data services
+resource "azurerm_subnet" "data_subnet" {
+  name             = "DataSubnet"
+  resource_group_name = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_vnet.name
+  address_prefixes = ["10.20.0.0/24"]
+}
+
+
+# ========================================================
+# PEERING CONNECTIONS (Hub to Spoke)
+# ========================================================
+
+# 1. Peering from Hub VNet to App Spoke VNet
+resource "azurerm_virtual_network_peering" "hub_to_app" {
+  name                = "HubToAppPeering"
+  resource_group_name = azurerm_resource_group.rg.name
+  local_vnet_name     = azurerm_vnet.name
+  remote_vnet_name    = azurerm_virtual_network.app_vnet.name
+}
+
+# 2. Peering from Hub VNet to Data Spoke VNet
+resource "azurerm_virtual_network_peering" "hub_to_data" {
+  name                = "HubToDataPeering"
+  resource_group_name = azurerm_resource_group.rg.name
+  local_vnet_name     = azurerm_vnet.name
+  remote_vnet_name    = azurerm_virtual_network.data_vnet.name
+}
+
+# NOTE ON SECURITY: Peering connections are purely network connectivity.
+# To enforce the "Zero Trust" aspect of the design, Network Security Groups (NSGs)
+# MUST be applied to the subnets in BOTH the hub and spoke, explicitly
+# allowing ONLY the required traffic (e.g., API traffic from App to Hub)
+# and NOTHING ELSE. This code assumes those NSGs are in place.
+
+
+
 /*
 =================================================================================
 NOTES ON VARIABLES AND DEPLOYMENT:
